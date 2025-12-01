@@ -17,7 +17,10 @@ env/
 # 或者是你想保留本地多个版本的 checkpoint，不想全部推送到仓库
 *.pth
 *.pt
-checkpoints/test/ *.pth
+checkpoints/test/*.pth
+checkpoints/**/*.pth
+checkpoints/**/*.pt
+!checkpoints/.gitkeep
 
 # 屏蔽训练日志和 Tensorboard 数据
 runs/
