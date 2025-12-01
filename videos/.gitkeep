@@ -1,0 +1,2 @@
+# This file ensures the videos/test directory is tracked by git
+# while ignoring the actual video files inside
