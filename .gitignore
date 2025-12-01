@@ -17,7 +17,7 @@ env/
 # 或者是你想保留本地多个版本的 checkpoint，不想全部推送到仓库
 *.pth
 *.pt
-checkpoints/
+checkpoints/test/ *.pth
 
 # 屏蔽训练日志和 Tensorboard 数据
 runs/
@@ -25,9 +25,7 @@ logs/
 results/
 
 # 屏蔽测试生成的视频（通常很大）
-videos/
-*.mp4
-*.gif
+videos/test/ *.mp4
 
 # --- 操作系统生成的文件 ---
 .DS_Store
