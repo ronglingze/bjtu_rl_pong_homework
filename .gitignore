@@ -25,7 +25,9 @@ logs/
 results/
 
 # 屏蔽测试生成的视频（通常很大）
-videos/test/ *.mp4
+videos/test/*.mp4
+videos/test/*.avi
+videos/test/*.gif
 
 # --- 操作系统生成的文件 ---
 .DS_Store
