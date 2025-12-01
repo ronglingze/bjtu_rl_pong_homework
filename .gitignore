@@ -1,0 +1,81 @@
+# --- Python 基础 ---
+__pycache__/
+*.py[cod]
+*$py.class
+
+# --- 虚拟环境 (根据你的习惯) ---
+venv/
+.venv/
+env/
+
+# --- IDE 配置 (不需要上传) ---
+.vscode/
+.idea/
+
+# --- 强化学习大作业特定 ---
+# 屏蔽训练好的模型权重（如果文件很大，比如超过100MB，GitHub会拒绝上传）
+# 或者是你想保留本地多个版本的 checkpoint，不想全部推送到仓库
+*.pth
+*.pt
+checkpoints/
+
+# 屏蔽训练日志和 Tensorboard 数据
+runs/
+logs/
+results/
+
+# 屏蔽测试生成的视频（通常很大）
+videos/
+*.mp4
+*.gif
+
+# --- 操作系统生成的文件 ---
+.DS_Store
+Thumbs.db
+
+# --- ROM 目录屏蔽 ---
+Roms/HC ROMS/
+Roms/ROMS/
+
+# --- 强化学习训练过程特定 ---
+# 实验跟踪工具数据
+wandb/
+mlflow/
+tensorboard/
+tensorboard_logs/
+
+# 数据和缓存文件
+*.npz
+*.npy
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+
+# Jupyter notebook 相关
+*.ipynb_checkpoints/
+
+# 临时文件和日志
+*.tmp
+*.temp
+*.log
+*.cache
+*.swp
+*.swo
+*~
+
+# 环境变量和配置
+.env
+.env.local
+.env.*.local
+
+# Hugging Face 缓存
+.huggingface/
+
+# 备份文件
+*.bak
+*.backup
+
+# 性能分析文件
+profiling/
+*.prof
