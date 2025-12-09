@@ -7,6 +7,8 @@ import random
 import os
 from collections import namedtuple, deque
 from utils.process_obs_tool import ObsProcessTool
+# 导入NoisyLinear
+from noisy_layer import NoisyLinear
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print(f"🔥 Using device: {device}")
@@ -15,7 +17,7 @@ if torch.cuda.is_available():
     print(f"🔥 CUDA device count: {torch.cuda.device_count()}")
     print(f"🔥 Current CUDA device: {torch.cuda.current_device()}")
 
-# 定义网络结构，输入为一张84*84的灰度图片，输出为各个动作的Q值，并采用2D卷积
+# 定义网络结构
 class DQN(nn.Module):
     def __init__(self, state_size, action_size, skip_frame=4, horizon=4, clip=False, left=False):
         super(DQN, self).__init__()
@@ -25,8 +27,9 @@ class DQN(nn.Module):
 
         fc_input_dims = self.calculate_conv_output_dims(state_size)
 
-        self.fc1 = nn.Linear(fc_input_dims, 512)
-        self.fc2 = nn.Linear(512, action_size)
+        # 使用导入的 NoisyLinear
+        self.fc1 = NoisyLinear(fc_input_dims, 512)
+        self.fc2 = NoisyLinear(512, action_size)
 
         self.obs_process_tool = ObsProcessTool(skip_frame=skip_frame, horizon=horizon, clip=clip, flip=left)
         self.pre_action = 2
@@ -38,12 +41,17 @@ class DQN(nn.Module):
         dims = self.conv3(dims)
         return int(np.prod(dims.size()))
 
+    # 重置网络中所有 Noisy 层的噪声
+    def reset_noise(self):
+        self.fc1.reset_noise()
+        self.fc2.reset_noise()
+
     def forward(self, state):
         layer = F.relu(self.conv1(state))
         layer = F.relu(self.conv2(layer))
         layer = F.relu(self.conv3(layer))
-        # conv3 shape = Batch Size X n_filters X H X W
         layer = layer.view(layer.size()[0], -1)
+        
         layer = F.relu(self.fc1(layer))
         layer = self.fc2(layer)
 
@@ -55,6 +63,7 @@ class DQN(nn.Module):
             return self.pre_action
         else:
             state = torch.from_numpy(np.float32(state)).unsqueeze(0).to(device)
+            # act调用前，Agent通常已经重置过噪声
             q_val = self.forward(state)
             act = q_val.max(1)[1].item()
             self.pre_action = act
@@ -70,33 +79,23 @@ class DQNAgent:
         self.gamma = gamma
         self.lr = lr
 
-        # 创建两个网络
         self.dqn_net = DQN(self.state_size, self.action_size, skip_frame=skip_frame, horizon=horizon, clip=clip, left=left).to(device)
         self.target_net = DQN(self.state_size, self.action_size, skip_frame=skip_frame, horizon=horizon, clip=clip, left=left).to(device)
         self.optimizer = optim.Adam(self.dqn_net.parameters(), lr=self.lr)
 
-        # 创建记忆库
         self.memory = deque(maxlen=memory_size)
+        
+        # 移除了 epsilon 相关参数，因为由 NoisyNet 全权接管探索
 
-        self.epsilon_max = 1.0
-        self.epsilon_min = 0.005
-        self.epsilon_decay = 0.00001
-
-    def select_action(self, state, eps):
-        self.dqn_net.eval()
-        if random.random() > eps:
-            act = self.dqn_net.act(state)
-        else:
-            code, state = self.dqn_net.obs_process_tool.process(state)
-            if code == -1:
-                act = self.dqn_net.pre_action
-            else:
-                act = random.randrange(self.action_size)
-                self.dqn_net.pre_action = act
+    def select_action(self, state, eps=None):
+        # 1. 重置噪声，确保探索性
+        self.dqn_net.reset_noise()
+        
+        # 2. 直接根据网络输出选择动作 (不再使用 epsilon-greedy)
+        act = self.dqn_net.act(state)
         return act
 
     def memory_push(self, state, action, next_state, reward, done):
-        # e = self.experience(state, action, next_state, reward, done)
         self.memory.append((state, action, next_state, reward, done))
 
     def memory_sample(self, batch_size):
@@ -110,12 +109,14 @@ class DQNAgent:
             return
 
         self.dqn_net.train()
-       # 更新target_net
         self.update_target_net(step)
 
         self.optimizer.zero_grad()
 
-        # 从记忆库中随机采样
+        # 训练时重置噪声，增加样本多样性
+        self.dqn_net.reset_noise()
+        self.target_net.reset_noise()
+
         states, actions, next_states, rewards, dones = self.memory_sample(self.batch_size)
 
         states = torch.from_numpy(np.float32(states)).to(device)
@@ -129,8 +130,7 @@ class DQNAgent:
 
         if actions.dtype != torch.int64:
             actions = actions.long()
-        # print(actions.dtype)
-        # exit()
+
         q_val = q_vals.gather(1, actions.unsqueeze(-1)).squeeze(-1)
         nxt_q_val = nxt_q_vals.max(1)[0]
         exp_q_val = rewards + self.gamma * nxt_q_val * (1 - dones)
@@ -138,7 +138,6 @@ class DQNAgent:
         loss = (q_val - exp_q_val.data.to(device)).pow(2).mean()
         loss.backward()
         self.optimizer.step()
-
 
     def save_model(self, episode, path):
         torch.save(self.dqn_net.state_dict(), os.path.join(path, 'eval_checkpoint_{}.pth'.format(episode)))
@@ -153,10 +152,11 @@ class DQNAgent:
             self.target_net.load_state_dict(self.dqn_net.state_dict())
 
     def update_epsilon(self, step):
-        eps = self.epsilon_min + (self.epsilon_max - self.epsilon_min) * np.exp(-1 * ((step + 1) * self.epsilon_decay))
-        return eps
-        # self.epsilon = max(self.epsilon_min, self.epsilon - self.epsilon_decay)
+        pass
     
     def reset(self):
         self.dqn_net.obs_process_tool.reset()
         self.target_net.obs_process_tool.reset()
+        # 重置环境时也重置噪声
+        self.dqn_net.reset_noise()
+        self.target_net.reset_noise()
