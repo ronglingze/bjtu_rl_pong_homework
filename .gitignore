@@ -17,9 +17,9 @@ env/
 # 或者是你想保留本地多个版本的 checkpoint，不想全部推送到仓库
 *.pth
 *.pt
-checkpoints/test/*.pth
-checkpoints/**/*.pth
-checkpoints/**/*.pt
+
+# 屏蔽整个 checkpoints 目录，但保留 .gitkeep
+checkpoints/*
 !checkpoints/.gitkeep
 
 # 屏蔽训练日志和 Tensorboard 数据
@@ -27,10 +27,10 @@ runs/
 logs/
 results/
 
-# 屏蔽测试生成的视频（通常很大）
-videos/test/*.mp4
-videos/test/*.avi
-videos/test/*.gif
+# 屏蔽整个 videos 目录，但保留 .gitkeep
+videos/*
+!videos/.gitkeep
+
 
 # --- 操作系统生成的文件 ---
 .DS_Store
