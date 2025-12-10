@@ -1,2 +1,0 @@
-# This file ensures the checkpoints directory is tracked by git
-# while ignoring the actual model weight files inside
