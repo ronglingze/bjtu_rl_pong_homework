@@ -19,7 +19,7 @@ env/
 *.pt
 
 # 屏蔽整个 checkpoints 目录，但保留 .gitkeep
-checkpoints/**
+checkpoints/*
 !checkpoints/.gitkeep
 
 # 屏蔽训练日志和 Tensorboard 数据
@@ -28,7 +28,7 @@ logs/
 results/
 
 # 屏蔽整个 videos 目录，但保留 .gitkeep
-videos/**
+videos/*
 !videos/.gitkeep
 
 
