@@ -8,7 +8,7 @@ import os
 from collections import namedtuple, deque
 from utils.process_obs_tool import ObsProcessTool
 # 导入NoisyLinear
-from noisy_layer import NoisyLinear
+from .noisy_layer import NoisyLinear
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print(f"🔥 Using device: {device}")
@@ -152,7 +152,8 @@ class DQNAgent:
             self.target_net.load_state_dict(self.dqn_net.state_dict())
 
     def update_epsilon(self, step):
-        pass
+        # NoisyNet不需要epsilon，返回0.0
+        return 0.0
     
     def reset(self):
         self.dqn_net.obs_process_tool.reset()
