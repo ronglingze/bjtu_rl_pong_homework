@@ -9,6 +9,7 @@ from collections import namedtuple, deque
 from utils.process_obs_tool import ObsProcessTool
 # 导入NoisyLinear
 from .noisy_layer import NoisyLinear
+from .PrioritizedReplayBuffer import PrioritizedReplayBuffer
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print(f"🔥 Using device: {device}")
@@ -102,7 +103,8 @@ class DQNAgent:
         self.target_net = DQN(self.state_size, self.action_size, skip_frame=skip_frame, horizon=horizon, clip=clip, left=left).to(device)
         self.optimizer = optim.Adam(self.dqn_net.parameters(), lr=self.lr)
 
-        self.memory = deque(maxlen=memory_size)
+        # 使用PrioritizedReplayBuffer替代原来的deque
+        self.memory = PrioritizedReplayBuffer(capacity=memory_size)
 
         # 移除了 epsilon 相关参数，因为由 NoisyNet 全权接管探索
 
@@ -115,12 +117,10 @@ class DQNAgent:
         return act
 
     def memory_push(self, state, action, next_state, reward, done):
-        self.memory.append((state, action, next_state, reward, done))
-
-    def memory_sample(self, batch_size):
-        idxs = np.random.choice(len(self.memory), batch_size, False)
-        states, actions, next_states, rewards, dones = zip(*[self.memory[i] for i in idxs])
-        return (np.array(states), np.array(actions), np.array(next_states), np.array(rewards, dtype=np.float32), np.array(dones, dtype=np.uint8))
+        # 对于新经验，我们使用较大的初始优先级以确保它们至少被学习一次
+        # TD-error将在后续更新中计算并更新
+        max_priority = 1.0
+        self.memory.push(max_priority, (state, action, next_state, reward, done))
 
     def update(self, step):
         if len(self.memory) < self.batch_size:
@@ -134,14 +134,16 @@ class DQNAgent:
         # 训练时重置噪声，增加样本多样性
         self.dqn_net.reset_noise()
         self.target_net.reset_noise()
-
-        states, actions, next_states, rewards, dones = self.memory_sample(self.batch_size)
+          
+        # 从优先经验回放缓冲区采样
+        states, actions, next_states, rewards, dones, indices, is_weights = self.memory.sample(self.batch_size)
 
         states = torch.from_numpy(np.float32(states)).to(device)
         actions = torch.from_numpy(actions).to(device)
         next_states = torch.from_numpy(np.float32(next_states)).to(device)
         rewards = torch.from_numpy(rewards).to(device)
         dones = torch.from_numpy(dones).to(device)
+        is_weights = torch.from_numpy(is_weights).to(device)
 
         q_vals = self.dqn_net(states)
         nxt_q_vals = self.target_net(next_states)
@@ -153,9 +155,17 @@ class DQNAgent:
         nxt_q_val = nxt_q_vals.max(1)[0]
         exp_q_val = rewards + self.gamma * nxt_q_val * (1 - dones)
 
-        loss = (q_val - exp_q_val.data.to(device)).pow(2).mean()
+         # 计算TD-error用于更新优先级
+        td_errors = torch.abs(q_val - exp_q_val.data)
+        
+        # 使用重要性采样权重调整损失函数
+        loss = (td_errors * is_weights).mean()
+
         loss.backward()
         self.optimizer.step()
+
+        # 更新经验的优先级
+        self.memory.update_priorities(indices, td_errors.detach().cpu().numpy())
 
     def save_model(self, episode, path):
         torch.save(self.dqn_net.state_dict(), os.path.join(path, 'eval_checkpoint_{}.pth'.format(episode)))
