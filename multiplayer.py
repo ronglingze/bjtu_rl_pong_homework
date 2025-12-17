@@ -361,7 +361,7 @@ def main(args):
                 else:
                     os.makedirs(CONFIG['model_dir'])
 
-                if os.path.exists(CONFIG['video_dir']):
+                if not os.path.exists(CONFIG['video_dir']):
                     os.makedirs(CONFIG['video_dir'])
 
         # 训练agent
