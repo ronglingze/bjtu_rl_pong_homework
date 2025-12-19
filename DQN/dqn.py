@@ -146,26 +146,35 @@ class DQNAgent:
         is_weights = torch.from_numpy(is_weights).to(device)
 
         q_vals = self.dqn_net(states)
-        nxt_q_vals = self.target_net(next_states)
 
         if actions.dtype != torch.int64:
             actions = actions.long()
 
         q_val = q_vals.gather(1, actions.unsqueeze(-1)).squeeze(-1)
-        nxt_q_val = nxt_q_vals.max(1)[0]
+
+        # Double DQN 目标计算：online 网络选择动作，target 网络评估该动作的 Q 值
+        with torch.no_grad():
+            next_online_q = self.dqn_net(next_states)
+            next_actions = next_online_q.max(1)[1]
+            next_target_q = self.target_net(next_states)
+            nxt_q_val = next_target_q.gather(1, next_actions.unsqueeze(-1)).squeeze(-1)
+
         exp_q_val = rewards + self.gamma * nxt_q_val * (1 - dones)
 
-         # 计算TD-error用于更新优先级
-        td_errors = torch.abs(q_val - exp_q_val.data)
-        
-        # 使用重要性采样权重调整损失函数
-        loss = (td_errors * is_weights).mean()
+        # 计算 per-sample TD-error（用于更新优先级）
+        td_errors = (q_val - exp_q_val).detach().cpu().numpy()
+
+        # 使用 Huber loss（per-sample）并乘以 IS 权重
+        per_sample_loss = F.smooth_l1_loss(q_val, exp_q_val, reduction='none')
+        # 确保 is_weights 的形状和设备一致
+        is_weights = is_weights.to(per_sample_loss.device).float()
+        loss = (is_weights * per_sample_loss).mean()
 
         loss.backward()
         self.optimizer.step()
 
         # 更新经验的优先级
-        self.memory.update_priorities(indices, td_errors.detach().cpu().numpy())
+        self.memory.update_priorities(indices, td_errors)
 
     def save_model(self, episode, path):
         torch.save(self.dqn_net.state_dict(), os.path.join(path, 'eval_checkpoint_{}.pth'.format(episode)))
