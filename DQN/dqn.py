@@ -22,7 +22,7 @@ if torch.cuda.is_available():
 # 定义网络结构
 class DQN(nn.Module):
 
-    def __init__(self, state_size, action_size, skip_frame=4, horizon=4, clip=False, left=False):
+    def __init__(self, state_size, action_size, skip_frame=4, horizon=4, clip=False, left=False,std_init = 0.4):
         super(DQN, self).__init__()
         self.conv1 = nn.Conv2d(state_size[0], 32, 8, stride=4)
         self.conv2 = nn.Conv2d(32, 64, 4, stride=2)
@@ -31,13 +31,13 @@ class DQN(nn.Module):
         fc_input_dims = self.calculate_conv_output_dims(state_size)
 
         # Dueling DQN: 共享特征提取层
-        self.shared_fc = NoisyLinear(fc_input_dims, 512)
+        self.shared_fc = NoisyLinear(fc_input_dims, 512, std_init = std_init)
 
         # 价值流 (Value Stream) - 输出 V(s)
-        self.value_stream = NoisyLinear(512, 1)
+        self.value_stream = NoisyLinear(512, 1,std_init = std_init)
 
         # 优势流 (Advantage Stream) - 输出 A(s,a)
-        self.advantage_stream = NoisyLinear(512, action_size)
+        self.advantage_stream = NoisyLinear(512, action_size,std_init = std_init)
 
         self.obs_process_tool = ObsProcessTool(skip_frame=skip_frame, horizon=horizon, clip=clip, flip=left)
         self.pre_action = 2
@@ -92,15 +92,15 @@ class DQN(nn.Module):
 # 定义代理类
 class DQNAgent:
 
-    def __init__(self, state_size, action_size, batch_size=64, gamma=0.99, lr=0.0001, memory_size=20000, skip_frame=4, horizon=4, clip=False, left=False):
+    def __init__(self, state_size, action_size, batch_size=64, gamma=0.995, lr=5e-5, memory_size=20000, skip_frame=4, horizon=4, clip=False, left=False,std_init=0.2):
         self.state_size = state_size
         self.action_size = action_size
         self.batch_size = batch_size
         self.gamma = gamma
         self.lr = lr
 
-        self.dqn_net = DQN(self.state_size, self.action_size, skip_frame=skip_frame, horizon=horizon, clip=clip, left=left).to(device)
-        self.target_net = DQN(self.state_size, self.action_size, skip_frame=skip_frame, horizon=horizon, clip=clip, left=left).to(device)
+        self.dqn_net = DQN(self.state_size, self.action_size, skip_frame=skip_frame, horizon=horizon, clip=clip, left=left,std_init=std_init).to(device)
+        self.target_net = DQN(self.state_size, self.action_size, skip_frame=skip_frame, horizon=horizon, clip=clip, left=left,std_init=std_init).to(device)
         self.optimizer = optim.Adam(self.dqn_net.parameters(), lr=self.lr)
 
         # 使用PrioritizedReplayBuffer替代原来的deque
@@ -122,8 +122,10 @@ class DQNAgent:
         max_priority = 1.0
         self.memory.push(max_priority, (state, action, next_state, reward, done))
 
-    def update(self, step):
+    def update(self, step, return_values=False):
         if len(self.memory) < self.batch_size:
+            if return_values:
+                return [], []
             return
 
         self.dqn_net.train()
@@ -131,10 +133,10 @@ class DQNAgent:
 
         self.optimizer.zero_grad()
 
-        # 训练时重置噪声，增加样本多样性
+        # 重置噪声
         self.dqn_net.reset_noise()
         self.target_net.reset_noise()
-          
+        
         # 从优先经验回放缓冲区采样
         states, actions, next_states, rewards, dones, indices, is_weights = self.memory.sample(self.batch_size)
 
@@ -146,13 +148,11 @@ class DQNAgent:
         is_weights = torch.from_numpy(is_weights).to(device)
 
         q_vals = self.dqn_net(states)
-
         if actions.dtype != torch.int64:
             actions = actions.long()
-
         q_val = q_vals.gather(1, actions.unsqueeze(-1)).squeeze(-1)
 
-        # Double DQN 目标计算：online 网络选择动作，target 网络评估该动作的 Q 值
+        # Double DQN 目标
         with torch.no_grad():
             next_online_q = self.dqn_net(next_states)
             next_actions = next_online_q.max(1)[1]
@@ -161,20 +161,26 @@ class DQNAgent:
 
         exp_q_val = rewards + self.gamma * nxt_q_val * (1 - dones)
 
-        # 计算 per-sample TD-error（用于更新优先级）
+        # TD-error
         td_errors = (q_val - exp_q_val).detach().cpu().numpy()
 
-        # 使用 Huber loss（per-sample）并乘以 IS 权重
         per_sample_loss = F.smooth_l1_loss(q_val, exp_q_val, reduction='none')
-        # 确保 is_weights 的形状和设备一致
         is_weights = is_weights.to(per_sample_loss.device).float()
         loss = (is_weights * per_sample_loss).mean()
 
         loss.backward()
         self.optimizer.step()
 
-        # 更新经验的优先级
+        # 更新经验优先级
         self.memory.update_priorities(indices, td_errors)
+
+        # Q 值均值
+        q_mean_val = q_val.mean().item()
+        loss_val = loss.item()
+
+        if return_values:
+            return loss_val, q_mean_val
+
 
     def save_model(self, episode, path):
         torch.save(self.dqn_net.state_dict(), os.path.join(path, 'eval_checkpoint_{}.pth'.format(episode)))
